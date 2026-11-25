@@ -1,14 +1,17 @@
-"""Điểm chạy mô phỏng Bài thực hành 1 & 2.1: python -m src.main."""
+"""Điểm chạy mô phỏng Bài thực hành 1 & 2.1: python -m src.main [--lidar]."""
+import argparse
 import tkinter as tk
 
 import matplotlib.patches as patches
 
 if __package__:
     from .GUI import RobotSimulatorGUI
+    from .lidar import Lidar
     from .Obstacle import Obstacle
     from .Robot import Differential_Robot
 else:
     from GUI import RobotSimulatorGUI
+    from lidar import Lidar
     from Obstacle import Obstacle
     from Robot import Differential_Robot
 
@@ -29,11 +32,32 @@ def build_scene():
     return robot, obstacles
 
 
-def main():
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description='Mô phỏng robot vi sai (tùy chọn kèm LiDAR khung cục bộ).')
+    parser.add_argument(
+        '--lidar', action='store_true',
+        help='hiển thị thêm khung LiDAR Scan (Robot Frame) theo tọa độ cục bộ')
+    parser.add_argument('--beams', type=int, default=120, help='số tia LiDAR')
+    parser.add_argument('--max-range', type=float, default=15.0,
+                        help='tầm quét LiDAR tối đa (m)')
+    parser.add_argument('--noise', type=float, default=0.02,
+                        help='độ lệch chuẩn nhiễu LiDAR (m)')
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = _parse_args(argv)
     robot, obstacles = build_scene()
+    lidar = None
+    if args.lidar:
+        lidar = Lidar(
+            obstacles, num_beams=args.beams,
+            max_range=args.max_range, noise_std=args.noise,
+        )
     root = tk.Tk()
     root.title('Differential Drive Robot Simulation')
-    RobotSimulatorGUI(root, robot, obstacles, dt=DT)
+    RobotSimulatorGUI(root, robot, obstacles, dt=DT, lidar=lidar)
     root.mainloop()
 
 

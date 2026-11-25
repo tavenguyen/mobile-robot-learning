@@ -4,6 +4,8 @@ Vật cản được lưu ở khung toàn cục (world frame). Mỗi lần quét
 điểm chạm trong khung toàn cục và trong khung cục bộ có tâm robot là (0, 0),
 trục +x hướng trước robot, trục +y hướng sang trái.
 """
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 

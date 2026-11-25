@@ -1,4 +1,6 @@
 """Mô phỏng chất điểm có hướng trong mặt phẳng (m, s, rad)."""
+from __future__ import annotations
+
 import numpy as np
 from collections.abc import Callable
 

@@ -23,6 +23,7 @@ if __package__:
     from .obstacle_editor import (
         MODE_CIRCLE, MODE_RECT, MODE_SELECT, ObstacleEditor,
     )
+    from .Robot import Differential_Robot
 else:
     from avoidance import Bug1Controller, Bug2Controller, TangentBugController
     from navigation import goal_command
@@ -32,6 +33,7 @@ else:
     from obstacle_editor import (
         MODE_CIRCLE, MODE_RECT, MODE_SELECT, ObstacleEditor,
     )
+    from Robot import Differential_Robot
 
 AVOIDANCE_MODES = ('Tắt né tránh', 'Bug1', 'Bug2', 'Tangent Bug', 'DWA',
                    'Dijkstra', 'A*', 'A* + DWA')
@@ -51,13 +53,20 @@ def _positive(value, name):
 class RobotSimulatorGUI:
     """Cửa sổ mô phỏng: vẽ quỹ đạo, điều khiển tay và báo va chạm."""
 
-    def __init__(self, root, robot, obstacles, dt=0.1):
+    def __init__(self, root, robot, obstacles, dt=0.1, lidar=None):
         self.root = root
         self.robot = robot
         self.obstacles = obstacles
         self.dt = _positive(dt, 'dt')
+        self.lidar = lidar
         self.last_collision_state = False
         self.ani = None
+        self.ax_lidar = None
+        self.local_robot = None
+        self.lidar_points_scatter = None
+        self.lidar_rays_collection = None
+        self.last_lidar_scan = None
+        self.last_lidar_local_points = np.empty((0, 2), dtype=float)
 
         # Auto-mode: click trên bản đồ đặt goal, nút Auto-mode bật/tắt
         self.auto_mode = False
@@ -102,14 +111,21 @@ class RobotSimulatorGUI:
     # Dựng giao diện
     # ------------------------------------------------------------------
     def setup_gui(self):
-        self.fig, self.ax = plt.subplots(figsize=(9, 6))
-        # Chừa vùng bên phải cho chú thích, không che bản đồ.
-        self.fig.subplots_adjust(right=0.74)
+        if self.lidar is not None:
+            self.fig, (self.ax, self.ax_lidar) = plt.subplots(
+                1, 2, figsize=(13.5, 6),
+            )
+            self.fig.subplots_adjust(left=0.06, right=0.97, wspace=0.25)
+        else:
+            self.fig, self.ax = plt.subplots(figsize=(9, 6))
+            # Chừa vùng bên phải cho chú thích, không che bản đồ.
+            self.fig.subplots_adjust(right=0.74)
         self.ax.set_xlim(-20, 20)
         self.ax.set_ylim(-20, 20)
         self.ax.set_aspect('equal')
         self.ax.grid()
-        self.ax.set_title('Differential Drive Robot Simulation')
+        self.ax.set_title('World View' if self.lidar is not None
+                          else 'Differential Drive Robot Simulation')
         self.ax.set_xlabel('X position (m)')
         self.ax.set_ylabel('Y position (m)')
 
@@ -172,10 +188,16 @@ class RobotSimulatorGUI:
             [], [], marker='D', color='#228B22', linestyle='None',
             markersize=6, label='Waypoint hiện tại',
         )
-        self.ax.legend(
-            loc='upper left', bbox_to_anchor=(1.03, 1.0),
-            borderaxespad=0, fontsize=8,
-        )
+        if self.ax_lidar is not None:
+            self.ax.legend(
+                loc='upper right', fontsize=7, framealpha=0.85,
+            )
+            self._setup_lidar_panel()
+        else:
+            self.ax.legend(
+                loc='upper left', bbox_to_anchor=(1.03, 1.0),
+                borderaxespad=0, fontsize=8,
+            )
 
         for obs in self.obstacles.obs:
             self.ax.add_patch(obs)
@@ -223,7 +245,60 @@ class RobotSimulatorGUI:
 
         self.root.protocol('WM_DELETE_WINDOW', self.close)
         self.robot.update_graphics(self.ax)
+        self._update_lidar_view()
         self.update_velocity_labels()
+
+    def _setup_lidar_panel(self):
+        limit = max(20.0, float(self.lidar.max_range) + 2.0)
+        self.ax_lidar.set_xlim(-limit, limit)
+        self.ax_lidar.set_ylim(-limit, limit)
+        self.ax_lidar.set_aspect('equal')
+        self.ax_lidar.grid()
+        self.ax_lidar.set_title('LiDAR Scan (Robot Frame)')
+        self.ax_lidar.set_xlabel('Local X / forward (m)')
+        self.ax_lidar.set_ylabel('Local Y / left (m)')
+
+        self.lidar_rays_collection = LineCollection(
+            [], colors='#1E90FF', linewidths=0.5, alpha=0.3, zorder=1,
+        )
+        self.ax_lidar.add_collection(self.lidar_rays_collection)
+        self.lidar_points_scatter = self.ax_lidar.scatter(
+            [], [], s=14, c='#d62728', zorder=3, label='LiDAR hits (local)',
+        )
+        self.local_robot = Differential_Robot(
+            self.robot.L, self.robot.robot_length, self.robot.robot_width,
+            self.robot.wheel_length, self.robot.wheel_width,
+        )
+        for patch in (
+            self.local_robot.robot_body,
+            self.local_robot.left_wheel,
+            self.local_robot.right_wheel,
+            self.local_robot.heading_arrow,
+            self.local_robot.left_arrow,
+            self.local_robot.right_arrow,
+        ):
+            self.ax_lidar.add_patch(patch)
+        self.local_robot.update_graphics(self.ax_lidar)
+        self.ax_lidar.legend(loc='upper right', fontsize=8, framealpha=0.85)
+
+    def _update_lidar_view(self):
+        if self.lidar is None or self.ax_lidar is None:
+            return
+        scan = self.lidar.scan(self.robot.x, self.robot.y, self.robot.theta)
+        self.last_lidar_scan = scan
+        local_hits = scan.local_points[scan.hit]
+        self.last_lidar_local_points = local_hits
+        if len(local_hits) > 0:
+            self.lidar_points_scatter.set_offsets(local_hits)
+            origin = np.broadcast_to(self.lidar.mount, local_hits.shape)
+            self.lidar_rays_collection.set_segments(
+                np.stack((origin, local_hits), axis=1),
+            )
+        else:
+            self.lidar_points_scatter.set_offsets(np.empty((0, 2)))
+            self.lidar_rays_collection.set_segments([])
+        self.local_robot.set_wheel_velocities(self.robot.v_l, self.robot.v_r)
+        self.local_robot.update_graphics(self.ax_lidar)
 
     def _create_status_display(self):
         self.velocity_frame = ttk.LabelFrame(
@@ -553,13 +628,19 @@ class RobotSimulatorGUI:
         self.robot_dot.set_data([self.robot.x], [self.robot.y])
         self._update_avoidance_overlays()
         self.robot.update_graphics(self.ax)
+        self._update_lidar_view()
         self.update_velocity_labels()
         self.canvas.draw_idle()
 
-        return (self.path_line, self.follow_line, self.robot_dot,
-                self.robot.robot_body, self.robot.left_wheel,
-                self.robot.right_wheel, self.robot.heading_arrow,
-                self.robot.left_arrow, self.robot.right_arrow)
+        artists = (
+            self.path_line, self.follow_line, self.robot_dot,
+            self.robot.robot_body, self.robot.left_wheel,
+            self.robot.right_wheel, self.robot.heading_arrow,
+            self.robot.left_arrow, self.robot.right_arrow,
+        )
+        if self.lidar_points_scatter is not None:
+            artists = artists + (self.lidar_points_scatter,)
+        return artists
 
     def _auto_control(self):
         """Chạy một bước điều khiển auto; trả Control hoặc None."""
@@ -1053,6 +1134,7 @@ class RobotSimulatorGUI:
         self._clear_avoidance_overlays()
         self._clear_collision_message()
         self.robot.update_graphics(self.ax)
+        self._update_lidar_view()
         self.update_velocity_labels()
         self._update_obstacle_controls()
         self.canvas.draw_idle()
