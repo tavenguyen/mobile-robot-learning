@@ -56,9 +56,39 @@ Chọn thuật toán ở combobox **Thuật toán**:
 
 Goal nằm trong vật cản hoặc quá sát vật cản (tâm robot sẽ chạm) được báo **FAILED** ngay thay vì né tránh vô hạn. Đổi thuật toán khi auto đang ON sẽ reset controller tại pose hiện tại và giữ nguyên goal.
 
+## LiDAR mô phỏng
+
+`src/lidar.py` cung cấp class `Lidar` quét vật cản tĩnh và trả đồng thời hai khung toạ độ:
+
+- `world_points`: toạ độ toàn cục của điểm chạm; vật cản vẫn nằm cố định trong `Obstacle`.
+- `local_points`: toạ độ trong khung robot, tâm robot `(0, 0)`, `+x` hướng trước, `+y` hướng trái.
+
+```python
+from src.lidar import Lidar
+
+lidar = Lidar(obstacles, num_beams=72, max_range=10.0,
+              noise_std=0.02, seed=42)
+scan = lidar.scan(robot.x, robot.y, robot.theta)
+
+print(scan.world_points.shape)   # (72, 2)
+print(scan.local_points.shape)   # (72, 2)
+fig, axes = lidar.plot_frames(scan)   # hai khung global/local
+```
+
+- Mặc định 72 tia; truyền `num_beams=360` khi cần xem mịn.
+- Nhiễu Gaussian cộng vào khoảng cách tia trúng, đơn vị mét; `seed` để tái lập.
+- `plot_frames` vẽ khung toàn cục bên trái và khung cục bộ bên phải; trả `(fig, (ax_global, ax_local))`.
+- Script xem riêng, không phụ thuộc mô phỏng né vật cản:
+
+```bash
+python -m src.lidar_demo
+python -m src.lidar_demo --beams 360
+python -m src.lidar_demo --animate
+```
+
 ## Phạm vi
 
-Đã cài đặt BTH1: động học vi sai, mô phỏng thời gian thực, điều khiển bằng nút/bàn phím, phát hiện va chạm. Đã cài đặt auto-mode của BTH2.1: click đặt goal, nút bật/tắt, P-controller và dừng khi tới đích. Đã cài đặt ba thuật toán né tránh chọn từ GUI: Bug1, Bug2 (contact sensor) và Tangent Bug (range sensor 360°), kèm hiển thị hit/leave point, m-line, biên offset, tia tiếp tuyến và đường rời. Đã cài đặt chỉnh sửa vật cản trên bản đồ: vẽ hình chữ nhật/hình tròn, chọn, di chuyển, đổi kích thước và xoá. Chưa cài đặt nhiễu vận tốc bánh, xoay vật cản, undo/redo hoặc lưu bản đồ.
+Đã cài đặt BTH1: động học vi sai, mô phỏng thời gian thực, điều khiển bằng nút/bàn phím, phát hiện va chạm. Đã cài đặt auto-mode của BTH2.1: click đặt goal, nút bật/tắt, P-controller và dừng khi tới đích. Đã cài đặt ba thuật toán né tránh chọn từ GUI: Bug1, Bug2 (contact sensor) và Tangent Bug (range sensor 360°), kèm hiển thị hit/leave point, m-line, biên offset, tia tiếp tuyến và đường rời. Đã cài đặt chỉnh sửa vật cản trên bản đồ: vẽ hình chữ nhật/hình tròn, chọn, di chuyển, đổi kích thước và xoá. Đã cài đặt LiDAR 2D mô phỏng riêng với hai khung toạ độ global/local. Chưa cài đặt nhiễu vận tốc bánh, xoay vật cản, undo/redo hoặc lưu bản đồ.
 
 ## Source layout
 
@@ -69,11 +99,13 @@ Goal nằm trong vật cản hoặc quá sát vật cản (tâm robot sẽ chạ
 - src/navigation.py: `goal_command` — P-controller tới goal; `point_command` — lái tới waypoint/tiếp tuyến.
 - src/avoidance.py: `Bug1Controller`, `Bug2Controller`, `TangentBugController` — state machine GOAL/RETREAT/FOLLOW/RECOVER/LEAVE và dữ liệu debug cho GUI.
 - src/sensors.py: `RangeSensor` 360°, raycast Rectangle/Circle, `clear_path`, `first_blocker`, nhóm khoảng trống và đầu mút tiếp tuyến.
+- src/lidar.py: class `Lidar` — quét vật cản tĩnh, trả điểm trong khung toàn cục và khung cục bộ; nhiễu khoảng cách; `plot_frames` vẽ hai khung.
+- src/lidar_demo.py: script xem mô phỏng LiDAR riêng (tĩnh hoặc động), không phụ thuộc GUI né vật cản.
 - src/boundary.py: `offset_polygon`/`offset_boundary` (biên Minkowski bo góc) và `BoundaryPath` theo độ dài cung.
 - src/main.py: điểm chạy, tạo robot và ba vật cản mẫu.
 - src/geometry.py, src/simulation.py, src/visualization.py, src/robot_drawing.py: thư viện mô phỏng hàng loạt (xem mục Reuse).
 - src/controller.py: bộ điều khiển của bản GUI cũ, hiện chỉ còn dùng trong tests.
-- tests/: động học, hình học, vật cản, va chạm, auto-mode, sensor/biên offset, ba thuật toán né tránh và mô phỏng hàng loạt.
+- tests/: động học, hình học, vật cản, va chạm, auto-mode, sensor/biên offset, LiDAR, ba thuật toán né tránh và mô phỏng hàng loạt.
 
 ## Reuse
 
